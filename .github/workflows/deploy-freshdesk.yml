@@ -31,6 +31,11 @@ jobs:
             echo "base_url=${{ secrets.AUTOHIVE_PROD_URL }}" >> $GITHUB_OUTPUT
           fi
 
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
       - name: Package integration
         run: |
           INTEGRATION_DIR="freshdesk"
@@ -98,3 +103,4 @@ jobs:
       - name: Cleanup dependencies
         if: always()
         run: rm -rf freshdesk/dependencies
+
