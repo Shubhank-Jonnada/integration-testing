@@ -1,147 +1,83 @@
-# GitHub Actions Workflow Template for Autohive Integration CI/CD
-#
-# USAGE INSTRUCTIONS:
-# ==================
-# 1. Copy this file to your integration repository as: `.github/workflows/deploy.yml`
-# 2. Replace all occurrences of `xero` with your actual integration folder name
-#    Example: If your integration folder is "hubspot_integration", replace `xero` with `hubspot_integration`
-#    Quick way: sed -i 's/xero/your_folder_name/g' .github/workflows/deploy.yml
-#
-# 3. Add the following secrets to your GitHub repository settings:
-#    - AUTOHIVE_BETA_DEPLOY_API_KEY: API key for beta environment
-#    - AUTOHIVE_PROD_DEPLOY_API_KEY: API key for production environment
-#    - AUTOHIVE_BETA_URL: Base URL for beta environment (e.g., https://beta.autohive.com)
-#    - AUTOHIVE_PROD_URL: Base URL for production environment (e.g., https://app.autohive.com)
-#    - AUTOHIVE_DEPLOY_PLAN_ID: Numeric plan ID for the integration
-#    - AUTOHIVE_DEPLOY_MEMBER_ID: Numeric member/author ID for deployments
-#    - SLACK_WEBHOOK_URL: Slack webhook URL for notifications
-
-name: Deploy xero Integration
+name: Deploy xero
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
     paths:
       - 'xero/**'
-      - '.github/workflows/deploy.yml'
   workflow_dispatch:
-    inputs:
-      environment:
-        description: 'Deployment environment'
-        required: true
-        default: 'beta'
-        type: choice
-        options:
-          - beta
-          - prod
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     name: Deploy xero
+
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Determine deployment environment
-        id: set-env
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install dependencies
         run: |
-          if [[ "${{ github.event_name }}" == "push" ]]; then
-            echo "environment=beta" >> $GITHUB_OUTPUT
-            echo "Deploying to beta due to push event"
-          else
-            echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
-            echo "Deploying to ${{ github.event.inputs.environment }} due to workflow_dispatch"
+          if [ -f "xero/requirements.txt" ]; then
+            pip install -r xero/requirements.txt \
+              --platform manylinux2014_x86_64 \
+              --python-version 3.13 \
+              --only-binary=:all: \
+              --target xero/dependencies/
           fi
 
-      - name: Set deployment configuration
-        id: config
-        run: |
-          if [[ "${{ steps.set-env.outputs.environment }}" == "beta" ]]; then
-            echo "api_key=${{ secrets.AUTOHIVE_BETA_DEPLOY_API_KEY }}" >> $GITHUB_OUTPUT
-            echo "base_url=${{ secrets.AUTOHIVE_BETA_URL }}" >> $GITHUB_OUTPUT
-          else
-            echo "api_key=${{ secrets.AUTOHIVE_PROD_DEPLOY_API_KEY }}" >> $GITHUB_OUTPUT
-            echo "base_url=${{ secrets.AUTOHIVE_PROD_URL }}" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Create integration zip file
+      - name: Package integration
         run: |
           cd xero
-          zip -r ../xero.zip .
+          find . \( -name __pycache__ -prune -o -name tests -prune -o -name test -prune \
+            -o -name .venv -prune -o -name venv -prune -o -name dependencies -prune \) \
+            -o -name "*.py" -print | zip ../xero.zip -@
+          zip ../xero.zip config.json
+          for icon in icon.*; do [ -f "$icon" ] && zip ../xero.zip "$icon"; done
+          if [ -d "dependencies" ]; then zip -r ../xero.zip dependencies/; fi
           cd ..
-          ls -lh xero.zip
+          echo "Package: $(du -sh xero.zip)"
 
-      - name: Deploy integration
+      - name: Deploy
         id: deploy
         run: |
           RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
-            "${{ steps.config.outputs.base_url }}/api/v1/integrations/deploy" \
-            -H "X-API-Key: ${{ steps.config.outputs.api_key }}" \
+            "${{ secrets.AUTOHIVE_BETA_URL }}/api/v1/integrations/deploy" \
+            -H "X-API-Key: ${{ secrets.AUTOHIVE_BETA_DEPLOY_API_KEY }}" \
             -F "zipFile=@xero.zip" \
             -F "planId=${{ secrets.AUTOHIVE_DEPLOY_PLAN_ID }}" \
             -F "authorMemberId=${{ secrets.AUTOHIVE_DEPLOY_MEMBER_ID }}")
 
           HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
-          JSON_RESPONSE=$(echo "$RESPONSE" | sed '$d')
+          BODY=$(echo "$RESPONSE" | sed '$d')
+          echo "HTTP: $HTTP_CODE"
+          echo "Response: $BODY"
 
-          echo "HTTP Status: $HTTP_CODE"
-          echo "Response: $JSON_RESPONSE"
+          if [[ "$HTTP_CODE" != "200" ]]; then echo "Deploy failed: HTTP $HTTP_CODE"; exit 1; fi
 
-          # Check HTTP status
-          if [[ "$HTTP_CODE" != "200" ]]; then
-            echo "error=HTTP $HTTP_CODE" >> $GITHUB_OUTPUT
-            echo "success=false" >> $GITHUB_OUTPUT
-            exit 1
-          fi
-
-          # Parse JSON response
-          SUCCESS=$(echo "$JSON_RESPONSE" | jq -r '.success // false')
-          ERROR=$(echo "$JSON_RESPONSE" | jq -r '.error // "Unknown error"')
-
+          SUCCESS=$(echo "$BODY" | jq -r '.success // false')
           if [[ "$SUCCESS" != "true" ]]; then
-            echo "error=$ERROR" >> $GITHUB_OUTPUT
-            echo "success=false" >> $GITHUB_OUTPUT
+            echo "Deploy failed: $(echo "$BODY" | jq -r '.error // "unknown"')"
             exit 1
           fi
 
-          echo "success=true" >> $GITHUB_OUTPUT
+      - name: Slack success
+        if: success() && env.SLACK_WEBHOOK_URL != ''
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          curl -s -X POST "$SLACK_WEBHOOK_URL" -H "Content-Type: application/json" \
+            -d "{\"text\": \"✅ *xero* deployed successfully\"}"
 
-      - name: Notify Slack on success
-        if: success()
-        uses: slackapi/slack-github-action@v1.24.0
-        with:
-          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
-          payload: |
-            {
-              "text": "✅ xero Integration Deployment Successful",
-              "blocks": [
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": "✅ *xero Integration Deployment Successful*\n\n*Environment:* ${{ steps.set-env.outputs.environment }}\n*Commit:* <${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}>\n*Ref:* ${{ github.ref }}\n*Triggered by:* ${{ github.event_name }}"
-                  }
-                }
-              ]
-            }
-
-      - name: Notify Slack on failure
-        if: failure()
-        uses: slackapi/slack-github-action@v1.24.0
-        with:
-          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
-          payload: |
-            {
-              "text": "❌ xero Integration Deployment Failed",
-              "blocks": [
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": "❌ *xero Integration Deployment Failed*\n\n*Environment:* ${{ steps.set-env.outputs.environment }}\n*Error:* ${{ steps.deploy.outputs.error }}\n*Commit:* <${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}>\n*Ref:* ${{ github.ref }}\n*Triggered by:* ${{ github.event_name }}\n*Run:* <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View logs>"
-                  }
-                }
-              ]
-            }
+      - name: Slack failure
+        if: failure() && env.SLACK_WEBHOOK_URL != ''
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          curl -s -X POST "$SLACK_WEBHOOK_URL" -H "Content-Type: application/json" \
+            -d "{\"text\": \"❌ *xero* deploy FAILED — <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|logs>\"}"
