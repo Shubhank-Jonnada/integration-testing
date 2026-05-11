@@ -39,7 +39,7 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    name: Deploy to ${{ steps.set-env.outputs.environment }}
+    name: Deploy xero
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
