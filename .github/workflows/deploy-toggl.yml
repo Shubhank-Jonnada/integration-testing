@@ -1,0 +1,100 @@
+﻿name: Deploy toggl Integration
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'beta'
+        type: choice
+        options:
+          - beta
+          - prod
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    name: Deploy toggl
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set deployment configuration
+        id: config
+        run: |
+          if [[ "${{ github.event.inputs.environment }}" == "beta" ]]; then
+            echo "api_key=${{ secrets.AUTOHIVE_BETA_DEPLOY_API_KEY }}" >> $GITHUB_OUTPUT
+            echo "base_url=${{ secrets.AUTOHIVE_BETA_URL }}" >> $GITHUB_OUTPUT
+          else
+            echo "api_key=${{ secrets.AUTOHIVE_PROD_DEPLOY_API_KEY }}" >> $GITHUB_OUTPUT
+            echo "base_url=${{ secrets.AUTOHIVE_PROD_URL }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Package integration
+        run: |
+          INTEGRATION_DIR="toggl"
+          REQUIREMENTS="$INTEGRATION_DIR/requirements.txt"
+          DEPS_DIR="$INTEGRATION_DIR/dependencies"
+
+          if [ -f "$REQUIREMENTS" ]; then
+            echo "Installing dependencies..."
+            pip install -r "$REQUIREMENTS" \
+              --platform manylinux2014_x86_64 \
+              --python-version 3.13 \
+              --only-binary=:all: \
+              --target "$DEPS_DIR"
+          fi
+
+          ZIP_FILE="toggl.zip"
+          cd "$INTEGRATION_DIR"
+
+          # Add Python files (excluding test/cache dirs)
+          find . -name "*.py" \
+            -not -path "./tests/*" -not -path "./test/*" \
+            -not -path "./__pycache__/*" -not -path "./.venv/*" \
+            -not -path "./venv/*" -not -path "./dependencies/*" | \
+            zip "../$ZIP_FILE" -@
+
+          # Add config and icons
+          zip "../$ZIP_FILE" config.json
+          find . -maxdepth 1 -name "icon*" | zip "../$ZIP_FILE" -@
+
+          # Add dependencies
+          if [ -d "dependencies" ]; then
+            zip -r "../$ZIP_FILE" dependencies/
+          fi
+
+          cd ..
+          ls -lh "$ZIP_FILE"
+
+      - name: Deploy integration
+        id: deploy
+        run: |
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            "${{ steps.config.outputs.base_url }}/api/v1/integrations/deploy" \
+            -H "X-API-Key: ${{ steps.config.outputs.api_key }}" \
+            -F "zipFile=@toggl.zip" \
+            -F "planId=${{ secrets.AUTOHIVE_DEPLOY_PLAN_ID }}" \
+            -F "authorMemberId=${{ secrets.AUTOHIVE_DEPLOY_MEMBER_ID }}")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
+          JSON_RESPONSE=$(echo "$RESPONSE" | sed '$d')
+
+          echo "HTTP: $HTTP_CODE"
+          echo "Response: $JSON_RESPONSE"
+
+          if [[ "$HTTP_CODE" != "200" ]]; then
+            exit 1
+          fi
+
+          SUCCESS=$(echo "$JSON_RESPONSE" | jq -r '.success // false')
+          if [[ "$SUCCESS" != "true" ]]; then
+            exit 1
+          fi
+
+          echo "success=true" >> $GITHUB_OUTPUT
+
+      - name: Cleanup dependencies
+        if: always()
+        run: rm -rf toggl/dependencies
