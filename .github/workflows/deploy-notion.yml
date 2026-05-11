@@ -1,10 +1,6 @@
 name: Deploy notion
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'notion/**'
   workflow_dispatch:
 
 jobs:

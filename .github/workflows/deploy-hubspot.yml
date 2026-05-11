@@ -1,10 +1,6 @@
 name: Deploy hubspot
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'hubspot/**'
   workflow_dispatch:
 
 jobs:

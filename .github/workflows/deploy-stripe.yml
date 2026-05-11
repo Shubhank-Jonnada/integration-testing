@@ -1,10 +1,6 @@
 name: Deploy stripe
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'stripe/**'
   workflow_dispatch:
 
 jobs:

@@ -1,10 +1,6 @@
 name: Deploy github
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'github/**'
   workflow_dispatch:
 
 jobs:

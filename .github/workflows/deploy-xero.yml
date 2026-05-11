@@ -1,10 +1,6 @@
 name: Deploy xero
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'xero/**'
   workflow_dispatch:
 
 jobs:
