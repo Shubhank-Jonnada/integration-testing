@@ -1,0 +1,35 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Test / tooling caches
+.pytest_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Packaging artifacts
+# `dependencies/` is produced by the Lambda packaging step (pip install --target)
+dependencies/
+build/
+dist/
+*.egg-info/
+*.zip
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Credentials — integration test suites read these
+.env
+.env.*
+!.env.example
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
