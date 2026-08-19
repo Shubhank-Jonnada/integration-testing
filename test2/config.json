@@ -1,0 +1,59 @@
+{
+  "name": "test2",
+  "version": "1.0.0",
+  "description": "Test2 integration for retrieving current weather conditions for a city via the OpenWeatherMap API",
+  "entry_point": "test2.py",
+  "display_name": "Test2",
+  "auth": {
+    "type": "custom",
+    "title": "OpenWeatherMap API Key",
+    "fields": {
+      "type": "object",
+      "properties": {
+        "api_key": {
+          "type": "string",
+          "format": "password",
+          "label": "API Key",
+          "help_text": "Generate an API key from your OpenWeatherMap account at https://home.openweathermap.org/api_keys"
+        }
+      },
+      "required": ["api_key"]
+    }
+  },
+  "actions": {
+    "get_current_weather": {
+      "display_name": "Get Current Weather",
+      "description": "Returns the current weather conditions for a city, including temperature, humidity, wind speed, and a short description of the conditions.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "city": {
+            "type": "string",
+            "description": "City name, optionally followed by a state and two-letter country code, for example 'Wellington,NZ'"
+          },
+          "units": {
+            "type": "string",
+            "description": "Unit system for temperature and wind speed",
+            "enum": ["metric", "imperial", "standard"],
+            "default": "metric"
+          }
+        },
+        "required": ["city"]
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "city": {"type": "string", "description": "Name of the city as resolved by OpenWeatherMap"},
+          "country": {"type": "string", "description": "Two-letter ISO country code"},
+          "conditions": {"type": "string", "description": "Short description of the current conditions"},
+          "temperature": {"type": "number", "description": "Current temperature in the requested units"},
+          "feels_like": {"type": "number", "description": "Apparent temperature in the requested units"},
+          "humidity": {"type": "integer", "description": "Relative humidity as a percentage"},
+          "wind_speed": {"type": "number", "description": "Wind speed in the requested units"},
+          "result": {"type": "boolean", "description": "Whether the lookup succeeded"}
+        },
+        "required": ["city", "result"]
+      }
+    }
+  }
+}
