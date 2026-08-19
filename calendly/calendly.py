@@ -1,0 +1,517 @@
+from autohive_integrations_sdk import Integration, ExecutionContext, ActionHandler, ActionResult, ActionError
+from typing import Dict, Any
+
+# Create the integration
+calendly = Integration.load()
+
+# Base URL for Calendly API v2
+CALENDLY_API_BASE_URL = "https://api.calendly.com"
+
+# Note: Authentication is handled automatically by the platform OAuth integration.
+# The context.fetch method automatically includes the OAuth token in requests.
+#
+# Calendly OAuth does not use traditional scopes - access is determined by
+# the user's subscription level (free, standard, teams, enterprise).
+# Webhooks require a paid plan (Standard or higher).
+
+
+# ---- User Handlers ----
+
+
+@calendly.action("get_current_user")
+class GetCurrentUserAction(ActionHandler):
+    """Get information about the currently authenticated user."""
+
+    async def execute(self, inputs: Dict[str, Any], context: ExecutionContext):
+        try:
+            response = await context.fetch(f"{CALENDLY_API_BASE_URL}/users/me", method="GET")
+
+            user = response.data.get("resource", response.data)
+
+            return ActionResult(data={"user": user}, cost_usd=0.0)
+
+        except Exception as e:
+            return ActionError(message=str(e))
+
+
+@calendly.action("get_user")
+class GetUserAction(ActionHandler):
+    """Get information about a specific user."""
+
+    async def execute(self, inputs: Dict[str, Any], context: ExecutionContext):
+        try:
+            user_uuid = inputs["user_uuid"]
+
+            response = await context.fetch(f"{CALENDLY_API_BASE_URL}/users/{user_uuid}", method="GET")
+
+            user = response.data.get("resource", response.data)
+
+            return ActionResult(data={"user": user}, cost_usd=0.0)
+
+        except Exception as e:
+            return ActionError(message=str(e))
+
+
+# ---- Event Type Handlers ----
+
+
+@calendly.action("list_event_types")
+class ListEventTypesAction(ActionHandler):
+    """List all event types for a user or organization."""
+
+    async def execute(self, inputs: Dict[str, Any], context: ExecutionContext):
+        try:
+            params = {}
+            if inputs.get("user") is not None:
+                params["user"] = inputs["user"]
+            if inputs.get("organization") is not None:
+                params["organization"] = inputs["organization"]
+            if inputs.get("active") is not None:
+                # Calendly's API expects the query value as the string "true"/"false";
+                # aiohttp refuses to serialize a Python bool into query params.
+                params["active"] = str(inputs["active"]).lower()
+            if inputs.get("sort") is not None:
+                params["sort"] = inputs["sort"]
+            if inputs.get("count") is not None:
+                params["count"] = inputs["count"]
+            if inputs.get("page_token") is not None:
+                params["page_token"] = inputs["page_token"]
+
+            response = await context.fetch(
+                f"{CALENDLY_API_BASE_URL}/event_types", method="GET", params=params if params else None
+            )
+
+            event_types = response.data.get("collection", [])
+            pagination = response.data.get("pagination", {})
+
+            return ActionResult(data={"event_types": event_types, "pagination": pagination}, cost_usd=0.0)
+
+        except Exception as e:
+            return ActionError(message=str(e))
+
+
+@calendly.action("get_event_type")
+class GetEventTypeAction(ActionHandler):
+    """Get details of a specific event type."""
+
+    async def execute(self, inputs: Dict[str, Any], context: ExecutionContext):
+        try:
+            event_type_uuid = inputs["event_type_uuid"]
+
+            response = await context.fetch(f"{CALENDLY_API_BASE_URL}/event_types/{event_type_uuid}", method="GET")
+
+            event_type = response.data.get("resource", response.data)
+
+            return ActionResult(data={"event_type": event_type}, cost_usd=0.0)
+
+        except Exception as e:
+            return ActionError(message=str(e))
+
+
+# ---- Scheduled Event Handlers ----
+
+
+@calendly.action("list_scheduled_events")
+class ListScheduledEventsAction(ActionHandler):
+    """List scheduled events for a user or organization."""
+
+    async def execute(self, inputs: Dict[str, Any], context: ExecutionContext):
+        try:
+            params = {}
+            if inputs.get("user") is not None:
+                params["user"] = inputs["user"]
+            if inputs.get("organization") is not None:
+                params["organization"] = inputs["organization"]
+            if inputs.get("invitee_email") is not None:
+                params["invitee_email"] = inputs["invitee_email"]
+            if inputs.get("status") is not None:
+                params["status"] = inputs["status"]
+            if inputs.get("min_start_time") is not None:
+                params["min_start_time"] = inputs["min_start_time"]
+            if inputs.get("max_start_time") is not None:
+                params["max_start_time"] = inputs["max_start_time"]
+            if inputs.get("sort") is not None:
+                params["sort"] = inputs["sort"]
+            if inputs.get("count") is not None:
+                params["count"] = inputs["count"]
+            if inputs.get("page_token") is not None:
+                params["page_token"] = inputs["page_token"]
+
+            response = await context.fetch(
+                f"{CALENDLY_API_BASE_URL}/scheduled_events", method="GET", params=params if params else None
+            )
+
+            events = response.data.get("collection", [])
+            pagination = response.data.get("pagination", {})
+
+            return ActionResult(data={"events": events, "pagination": pagination}, cost_usd=0.0)
+
+        except Exception as e:
+            return ActionError(message=str(e))
+
+
+@calendly.action("get_scheduled_event")
+class GetScheduledEventAction(ActionHandler):
+    """Get details of a specific scheduled event."""
+
+    async def execute(self, inputs: Dict[str, Any], context: ExecutionContext):
+        try:
+            event_uuid = inputs["event_uuid"]
+
+            response = await context.fetch(f"{CALENDLY_API_BASE_URL}/scheduled_events/{event_uuid}", method="GET")
+
+            event = response.data.get("resource", response.data)
+
+            return ActionResult(data={"event": event}, cost_usd=0.0)
+
+        except Exception as e:
+            return ActionError(message=str(e))
+
+
+@calendly.action("cancel_scheduled_event")
+class CancelScheduledEventAction(ActionHandler):
+    """Cancel a scheduled event."""
+
+    async def execute(self, inputs: Dict[str, Any], context: ExecutionContext):
+        try:
+            event_uuid = inputs["event_uuid"]
+
+            body = {}
+            if inputs.get("reason"):
+                body["reason"] = inputs["reason"]
+
+            await context.fetch(
+                f"{CALENDLY_API_BASE_URL}/scheduled_events/{event_uuid}/cancellation",
+                method="POST",
+                json=body if body else None,
+            )
+
+            return ActionResult(data={"canceled": True}, cost_usd=0.0)
+
+        except Exception as e:
+            return ActionError(message=str(e))
+
+
+# ---- Invitee Handlers ----
+
+
+@calendly.action("list_event_invitees")
+class ListEventInviteesAction(ActionHandler):
+    """List all invitees for a scheduled event."""
+
+    async def execute(self, inputs: Dict[str, Any], context: ExecutionContext):
+        try:
+            event_uuid = inputs["event_uuid"]
+
+            params = {}
+            if inputs.get("status") is not None:
+                params["status"] = inputs["status"]
+            if inputs.get("sort") is not None:
+                params["sort"] = inputs["sort"]
+            if inputs.get("email") is not None:
+                params["email"] = inputs["email"]
+            if inputs.get("count") is not None:
+                params["count"] = inputs["count"]
+            if inputs.get("page_token") is not None:
+                params["page_token"] = inputs["page_token"]
+
+            response = await context.fetch(
+                f"{CALENDLY_API_BASE_URL}/scheduled_events/{event_uuid}/invitees",
+                method="GET",
+                params=params if params else None,
+            )
+
+            invitees = response.data.get("collection", [])
+            pagination = response.data.get("pagination", {})
+
+            return ActionResult(data={"invitees": invitees, "pagination": pagination}, cost_usd=0.0)
+
+        except Exception as e:
+            return ActionError(message=str(e))
+
+
+@calendly.action("get_invitee")
+class GetInviteeAction(ActionHandler):
+    """Get details of a specific invitee."""
+
+    async def execute(self, inputs: Dict[str, Any], context: ExecutionContext):
+        try:
+            event_uuid = inputs["event_uuid"]
+            invitee_uuid = inputs["invitee_uuid"]
+
+            # Calendly API v2 requires invitees to be accessed through the scheduled event endpoint
+            response = await context.fetch(
+                f"{CALENDLY_API_BASE_URL}/scheduled_events/{event_uuid}/invitees/{invitee_uuid}", method="GET"
+            )
+
+            invitee = response.data.get("resource", response.data)
+
+            return ActionResult(data={"invitee": invitee}, cost_usd=0.0)
+
+        except Exception as e:
+            return ActionError(message=str(e))
+
+
+# ---- Availability Handlers ----
+
+
+@calendly.action("get_event_type_available_times")
+class GetEventTypeAvailableTimesAction(ActionHandler):
+    """Get available time slots for an event type (max 7 days)."""
+
+    async def execute(self, inputs: Dict[str, Any], context: ExecutionContext):
+        try:
+            params = {
+                "event_type": inputs["event_type"],
+                "start_time": inputs["start_time"],
+                "end_time": inputs["end_time"],
+            }
+
+            response = await context.fetch(
+                f"{CALENDLY_API_BASE_URL}/event_type_available_times", method="GET", params=params
+            )
+
+            available_times = response.data.get("collection", [])
+
+            return ActionResult(data={"available_times": available_times}, cost_usd=0.0)
+
+        except Exception as e:
+            return ActionError(message=str(e))
+
+
+@calendly.action("get_user_busy_times")
+class GetUserBusyTimesAction(ActionHandler):
+    """Get busy time slots for a user."""
+
+    async def execute(self, inputs: Dict[str, Any], context: ExecutionContext):
+        try:
+            params = {"user": inputs["user"], "start_time": inputs["start_time"], "end_time": inputs["end_time"]}
+
+            response = await context.fetch(f"{CALENDLY_API_BASE_URL}/user_busy_times", method="GET", params=params)
+
+            busy_times = response.data.get("collection", [])
+
+            return ActionResult(data={"busy_times": busy_times}, cost_usd=0.0)
+
+        except Exception as e:
+            return ActionError(message=str(e))
+
+
+@calendly.action("list_user_availability_schedules")
+class ListUserAvailabilitySchedulesAction(ActionHandler):
+    """List availability schedules for a user."""
+
+    async def execute(self, inputs: Dict[str, Any], context: ExecutionContext):
+        try:
+            params = {"user": inputs["user"]}
+
+            response = await context.fetch(
+                f"{CALENDLY_API_BASE_URL}/user_availability_schedules", method="GET", params=params
+            )
+
+            schedules = response.data.get("collection", [])
+
+            return ActionResult(data={"availability_schedules": schedules}, cost_usd=0.0)
+
+        except Exception as e:
+            return ActionError(message=str(e))
+
+
+# ---- Organization Handlers ----
+
+
+@calendly.action("list_organization_memberships")
+class ListOrganizationMembershipsAction(ActionHandler):
+    """List all members of an organization."""
+
+    async def execute(self, inputs: Dict[str, Any], context: ExecutionContext):
+        try:
+            params = {}
+            if inputs.get("organization") is not None:
+                params["organization"] = inputs["organization"]
+            if inputs.get("user") is not None:
+                params["user"] = inputs["user"]
+            if inputs.get("email") is not None:
+                params["email"] = inputs["email"]
+            if inputs.get("count") is not None:
+                params["count"] = inputs["count"]
+            if inputs.get("page_token") is not None:
+                params["page_token"] = inputs["page_token"]
+
+            response = await context.fetch(
+                f"{CALENDLY_API_BASE_URL}/organization_memberships", method="GET", params=params if params else None
+            )
+
+            memberships = response.data.get("collection", [])
+            pagination = response.data.get("pagination", {})
+
+            return ActionResult(data={"memberships": memberships, "pagination": pagination}, cost_usd=0.0)
+
+        except Exception as e:
+            return ActionError(message=str(e))
+
+
+# ---- Webhook Handlers ----
+
+
+@calendly.action("list_webhooks")
+class ListWebhooksAction(ActionHandler):
+    """List webhook subscriptions."""
+
+    async def execute(self, inputs: Dict[str, Any], context: ExecutionContext):
+        try:
+            params = {"organization": inputs["organization"]}
+            if inputs.get("user") is not None:
+                params["user"] = inputs["user"]
+            if inputs.get("scope") is not None:
+                params["scope"] = inputs["scope"]
+            if inputs.get("count") is not None:
+                params["count"] = inputs["count"]
+            if inputs.get("page_token") is not None:
+                params["page_token"] = inputs["page_token"]
+
+            response = await context.fetch(
+                f"{CALENDLY_API_BASE_URL}/webhook_subscriptions", method="GET", params=params
+            )
+
+            webhooks = response.data.get("collection", [])
+            pagination = response.data.get("pagination", {})
+
+            return ActionResult(data={"webhooks": webhooks, "pagination": pagination}, cost_usd=0.0)
+
+        except Exception as e:
+            return ActionError(message=str(e))
+
+
+@calendly.action("get_webhook")
+class GetWebhookAction(ActionHandler):
+    """Get details of a specific webhook subscription."""
+
+    async def execute(self, inputs: Dict[str, Any], context: ExecutionContext):
+        try:
+            webhook_uuid = inputs["webhook_uuid"]
+
+            response = await context.fetch(
+                f"{CALENDLY_API_BASE_URL}/webhook_subscriptions/{webhook_uuid}", method="GET"
+            )
+
+            webhook = response.data.get("resource", response.data)
+
+            return ActionResult(data={"webhook": webhook}, cost_usd=0.0)
+
+        except Exception as e:
+            return ActionError(message=str(e))
+
+
+@calendly.action("create_webhook")
+class CreateWebhookAction(ActionHandler):
+    """Create a webhook subscription (requires paid plan)."""
+
+    async def execute(self, inputs: Dict[str, Any], context: ExecutionContext):
+        try:
+            body = {
+                "url": inputs["url"],
+                "events": inputs["events"],
+                "organization": inputs["organization"],
+                "scope": inputs["scope"],
+            }
+
+            if inputs.get("user"):
+                body["user"] = inputs["user"]
+            if inputs.get("signing_key"):
+                body["signing_key"] = inputs["signing_key"]
+
+            response = await context.fetch(f"{CALENDLY_API_BASE_URL}/webhook_subscriptions", method="POST", json=body)
+
+            webhook = response.data.get("resource", response.data)
+
+            return ActionResult(data={"webhook": webhook}, cost_usd=0.0)
+
+        except Exception as e:
+            return ActionError(message=str(e))
+
+
+@calendly.action("delete_webhook")
+class DeleteWebhookAction(ActionHandler):
+    """Delete a webhook subscription."""
+
+    async def execute(self, inputs: Dict[str, Any], context: ExecutionContext):
+        try:
+            webhook_uuid = inputs["webhook_uuid"]
+
+            await context.fetch(f"{CALENDLY_API_BASE_URL}/webhook_subscriptions/{webhook_uuid}", method="DELETE")
+
+            return ActionResult(data={"deleted": True}, cost_usd=0.0)
+
+        except Exception as e:
+            return ActionError(message=str(e))
+
+
+# ---- Routing Form Handlers ----
+
+
+@calendly.action("list_routing_forms")
+class ListRoutingFormsAction(ActionHandler):
+    """List routing forms for an organization."""
+
+    async def execute(self, inputs: Dict[str, Any], context: ExecutionContext):
+        try:
+            params = {"organization": inputs["organization"]}
+            if inputs.get("count"):
+                params["count"] = inputs["count"]
+            if inputs.get("page_token"):
+                params["page_token"] = inputs["page_token"]
+
+            response = await context.fetch(f"{CALENDLY_API_BASE_URL}/routing_forms", method="GET", params=params)
+
+            routing_forms = response.data.get("collection", [])
+            pagination = response.data.get("pagination", {})
+
+            return ActionResult(data={"routing_forms": routing_forms, "pagination": pagination}, cost_usd=0.0)
+
+        except Exception as e:
+            return ActionError(message=str(e))
+
+
+@calendly.action("get_routing_form")
+class GetRoutingFormAction(ActionHandler):
+    """Get details of a specific routing form."""
+
+    async def execute(self, inputs: Dict[str, Any], context: ExecutionContext):
+        try:
+            routing_form_uuid = inputs["routing_form_uuid"]
+
+            response = await context.fetch(f"{CALENDLY_API_BASE_URL}/routing_forms/{routing_form_uuid}", method="GET")
+
+            routing_form = response.data.get("resource", response.data)
+
+            return ActionResult(data={"routing_form": routing_form}, cost_usd=0.0)
+
+        except Exception as e:
+            return ActionError(message=str(e))
+
+
+@calendly.action("list_routing_form_submissions")
+class ListRoutingFormSubmissionsAction(ActionHandler):
+    """List submissions for a routing form."""
+
+    async def execute(self, inputs: Dict[str, Any], context: ExecutionContext):
+        try:
+            # Calendly API expects 'form' parameter, not 'routing_form'
+            params = {"form": inputs["routing_form"]}
+            if inputs.get("count"):
+                params["count"] = inputs["count"]
+            if inputs.get("page_token"):
+                params["page_token"] = inputs["page_token"]
+
+            response = await context.fetch(
+                f"{CALENDLY_API_BASE_URL}/routing_form_submissions", method="GET", params=params
+            )
+
+            submissions = response.data.get("collection", [])
+            pagination = response.data.get("pagination", {})
+
+            return ActionResult(data={"submissions": submissions, "pagination": pagination}, cost_usd=0.0)
+
+        except Exception as e:
+            return ActionError(message=str(e))
