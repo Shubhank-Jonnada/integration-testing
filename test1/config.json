@@ -1,0 +1,55 @@
+{
+  "name": "test1",
+  "version": "1.0.0",
+  "description": "Test1 integration for looking up geolocation and network ownership details for an IP address via ipinfo.io",
+  "entry_point": "test1.py",
+  "display_name": "Test1",
+  "auth": {
+    "type": "custom",
+    "title": "ipinfo Access Token",
+    "fields": {
+      "type": "object",
+      "properties": {
+        "api_token": {
+          "type": "string",
+          "format": "password",
+          "label": "Access Token",
+          "help_text": "Generate an access token from your ipinfo.io dashboard at https://ipinfo.io/account/token"
+        }
+      },
+      "required": ["api_token"]
+    }
+  },
+  "actions": {
+    "lookup_ip": {
+      "display_name": "Look Up IP",
+      "description": "Returns geolocation and network ownership details for an IPv4 or IPv6 address, including city, region, country, coordinates, and the owning organisation or ASN. Omit the address to look up the caller's own IP.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "ip_address": {
+            "type": "string",
+            "description": "The IPv4 or IPv6 address to look up. Leave empty to look up the IP address of the caller."
+          }
+        },
+        "required": []
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ip": {"type": "string", "description": "The IP address that was looked up"},
+          "hostname": {"type": "string", "description": "Reverse DNS hostname, if known"},
+          "city": {"type": "string", "description": "City the IP address is registered to"},
+          "region": {"type": "string", "description": "State or region the IP address is registered to"},
+          "country": {"type": "string", "description": "Two-letter ISO country code"},
+          "loc": {"type": "string", "description": "Latitude and longitude as a comma-separated pair"},
+          "org": {"type": "string", "description": "Owning organisation, prefixed with its ASN"},
+          "postal": {"type": "string", "description": "Postal or ZIP code"},
+          "timezone": {"type": "string", "description": "IANA timezone name"},
+          "result": {"type": "boolean", "description": "Whether the lookup succeeded"}
+        },
+        "required": ["ip", "result"]
+      }
+    }
+  }
+}
