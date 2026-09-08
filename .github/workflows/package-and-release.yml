@@ -1,11 +1,13 @@
 name: Package integrations for Autohive
-run-name: Package integrations (${{ inputs.request_id || github.run_id }})
+run-name: Package changed integrations (${{ inputs.request_id || github.run_id }})
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       integrations:
-        description: Comma/newline-separated integration paths or source IDs, or "all"
+        description: Comma/newline-separated integration paths, or "all"
         required: true
         default: all
         type: string
@@ -16,6 +18,7 @@ on:
         type: string
 
 permissions:
+  actions: read
   contents: write
 
 concurrency:
@@ -24,20 +27,20 @@ concurrency:
 
 jobs:
   package-and-release:
+    if: github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
     timeout-minutes: 240
     steps:
       - name: Check out integrations
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Check out HiveUp tooling
         uses: actions/checkout@v4
         with:
           repository: Autohive-AI/autohive-integrations-tooling
-          # Use the tooling PR branch until its immutable 2.5.0 tag is published.
           ref: feat/61/release-manifest
           path: .hiveup-tooling
           persist-credentials: false
@@ -52,29 +55,80 @@ jobs:
       - name: Install HiveUp
         run: python -m pip install ./.hiveup-tooling
 
-      - name: Resolve selection
+      - name: Resolve release contents
+        id: selection
+        shell: bash
         env:
-          RELEASE_SELECTION: ${{ inputs.integrations }}
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_BEFORE: ${{ github.event.before }}
+          MANUAL_SELECTION: ${{ inputs.integrations }}
         run: |
           set -euo pipefail
-          hiveup release-plan \
-            --repository-root . \
-            --config .github/autohive-release.json \
-            --selection "$RELEASE_SELECTION" > "$RUNNER_TEMP/integration-paths.txt"
-          test -s "$RUNNER_TEMP/integration-paths.txt"
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            # A concurrency group can replace an older pending run when several
+            # merges land quickly. Compare with the newest successful push run
+            # that is an ancestor of this commit so the surviving run packages
+            # every version bump that an intermediate cancelled run would have
+            # handled.
+            previous_commit_sha=""
+            while IFS= read -r candidate_sha; do
+              if [[ -n "$candidate_sha" && "$candidate_sha" != "$GITHUB_SHA" ]] && \
+                 git merge-base --is-ancestor "$candidate_sha" "$GITHUB_SHA"; then
+                previous_commit_sha="$candidate_sha"
+                break
+              fi
+            done < <(
+              gh api \
+                --paginate \
+                "repos/$GITHUB_REPOSITORY/actions/workflows/package-and-release.yml/runs?branch=$GITHUB_REF_NAME&event=push&status=success&per_page=100" \
+                --jq '.workflow_runs[].head_sha'
+            )
+            previous_commit_sha="${previous_commit_sha:-$EVENT_BEFORE}"
+            release_kind="incremental"
+            hiveup release-changes \
+              --repository-root . \
+              --config .github/autohive-release.json \
+              --base-ref "$previous_commit_sha" > "$RUNNER_TEMP/integration-paths.txt"
+          else
+            previous_commit_sha="$(git rev-parse "$GITHUB_SHA^")"
+            release_kind="snapshot"
+            hiveup release-plan \
+              --repository-root . \
+              --config .github/autohive-release.json \
+              --selection "$MANUAL_SELECTION" > "$RUNNER_TEMP/integration-paths.txt"
+          fi
+
+          if [[ ! -s "$RUNNER_TEMP/integration-paths.txt" ]]; then
+            echo "No integration version bumps were found; no release is required."
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          release_selection="$(paste -sd, "$RUNNER_TEMP/integration-paths.txt")"
+          echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          echo "release_selection=$release_selection" >> "$GITHUB_OUTPUT"
+          echo "previous_commit_sha=$previous_commit_sha" >> "$GITHUB_OUTPUT"
+          echo "release_kind=$release_kind" >> "$GITHUB_OUTPUT"
           cat "$RUNNER_TEMP/integration-paths.txt"
 
       - name: Package integrations
+        if: steps.selection.outputs.has_changes == 'true'
         run: |
           set -euo pipefail
           mkdir -p dist
+          # Pull requests have their own validation workflow. Release packaging must remain
+          # reproducible for already-merged integrations even if validation rules later tighten.
           xargs --max-procs 4 --no-run-if-empty -I {} \
             hiveup package "{}" --output "dist/{}.zip" --skip-validate \
             < "$RUNNER_TEMP/integration-paths.txt"
 
       - name: Create integrity manifest
+        if: steps.selection.outputs.has_changes == 'true'
         env:
-          RELEASE_SELECTION: ${{ inputs.integrations }}
+          RELEASE_SELECTION: ${{ steps.selection.outputs.release_selection }}
+          PREVIOUS_COMMIT_SHA: ${{ steps.selection.outputs.previous_commit_sha }}
+          RELEASE_KIND: ${{ steps.selection.outputs.release_kind }}
         run: |
           set -euo pipefail
           hiveup release-manifest \
@@ -86,12 +140,16 @@ jobs:
             --owner "$GITHUB_REPOSITORY_OWNER" \
             --repository "${GITHUB_REPOSITORY#*/}" \
             --commit-sha "$GITHUB_SHA" \
+            --previous-commit-sha "$PREVIOUS_COMMIT_SHA" \
+            --release-kind "$RELEASE_KIND" \
             --workflow-run-id "$GITHUB_RUN_ID"
 
       - name: Publish GitHub Release
+        if: steps.selection.outputs.has_changes == 'true'
         id: release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_KIND: ${{ steps.selection.outputs.release_kind }}
         run: |
           set -euo pipefail
           tag="integration-packages-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
@@ -102,10 +160,11 @@ jobs:
           gh release create "$tag" "${assets[@]}" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title "Integration packages ${GITHUB_SHA::12}" \
-            --notes "Generated by workflow run ${GITHUB_RUN_ID} from commit ${GITHUB_SHA}. Deploy remains gated in the Autohive Admin UI; this release does not publish integrations to users."
+            --title "Integration ${RELEASE_KIND} ${GITHUB_SHA::12}" \
+            --notes "Packages only integrations whose config version changed in this merge range. Deployment and publishing remain gated in the Autohive Admin UI."
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "### Published [$tag]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$tag)" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Record release tag
+        if: steps.selection.outputs.has_changes == 'true'
         run: echo "Release tag is ${{ steps.release.outputs.tag }}"
