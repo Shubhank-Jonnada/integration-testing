@@ -1,7 +1,7 @@
 {
   "name": "sync-smoke",
   "display_name": "Sync Smoke",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "No-auth echo fixture for integration release, upload, and rollback testing.",
   "entry_point": "sync_smoke.py",
   "actions": {
