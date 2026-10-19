@@ -1,0 +1,40 @@
+{
+  "name": "sync-smoke",
+  "display_name": "Sync Smoke",
+  "version": "1.0.0",
+  "description": "No-auth echo fixture for integration release, upload, and rollback testing.",
+  "entry_point": "sync_smoke.py",
+  "actions": {
+    "echo": {
+      "display_name": "Echo message",
+      "description": "Return a message and the packaged integration version without external API calls.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "Message to echo."
+          }
+        },
+        "required": [
+          "message"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "version"
+        ]
+      }
+    }
+  }
+}
